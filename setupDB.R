@@ -36,14 +36,14 @@ dbExecute(db, 'CREATE TABLE Factor (
 # table of sources for different associations
 dbExecute(db, 'CREATE TABLE Source (
           sid int PRIMARY KEY,
-          doi varchar(50),
-          title varchar(255))')
+          doi varchar(50))')
 
 # table of region activity in cell type 
 dbExecute(db, 'CREATE TABLE Activity (
           rid int,
           cid int,
           sid int,
+          evidence varchar(50),
           activity varchar(20),
           PRIMARY KEY (rid, cid, sid),
           FOREIGN KEY (rid) REFERENCES Region(rid),
@@ -56,6 +56,7 @@ dbExecute(db, 'CREATE TABLE Target (
           cid int,
           fid int,
           sid int,
+          evidence varchar(50),
           activity varchar(20),
           PRIMARY KEY (rid, cid, fid, sid),
           FOREIGN KEY (rid) REFERENCES Region(rid),
@@ -69,6 +70,7 @@ dbExecute(db, 'CREATE TABLE Contact (
           rid2 int,
           cid int,
           sid int,
+          evidence varchar(50),
           activity varchar(20),
           PRIMARY KEY (rid1, rid2, cid, sid),
           FOREIGN KEY (rid1) REFERENCES Region(rid),
