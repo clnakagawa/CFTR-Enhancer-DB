@@ -1,4 +1,4 @@
-library(shiny)
+library(shinydashboard)
 library(bslib)
 library(DBI)
 library(RSQLite)
@@ -18,31 +18,72 @@ evidenceChoices <- list(
 # Tabs info for viewing tables
 tabsInfo <- list(
   list(title = "Regions", tableId = "Region", sql = "SELECT * FROM Region"),
-  list(title = "Region Contacts", tableId = "Contact", sql = "SELECT * FROM Contact"),
-  list(title = "Region Targeting", tableId = "Target", sql = "SELECT * FROM Target"),
-  list(title = "Region Activity", tableId = "Activity", sql = "SELECT * FROM Activity")
+  list(title = "Region Contacts", tableId = "Contact", sql = "SELECT r1.name AS region1, r2.name AS region2,
+       c.name AS cell_type, c.tissue AS tissue, s.doi AS doi, evidence AS experiment, activity
+       FROM Contact JOIN Region AS r1 ON Contact.rid1 = r1.rid
+       JOIN Region AS r2 ON Contact.rid2 = r2.rid
+       JOIN Cell AS c ON Contact.cid = c.cid
+       JOIN Source AS s ON Contact.sid = s.sid;"),
+  list(title = "Region Targeting", tableId = "Target", sql = "SELECT r.name as region, c.name as cell_type,
+       c.tissue AS tissue, f.name as factor, s.doi as doi, evidence AS experiment, activity
+       FROM Target JOIN Region AS r ON Target.rid = r.rid
+       JOIN Cell AS c ON Target.cid = c.cid
+       JOIN Factor AS f ON Target.fid = f.fid
+       JOIN Source AS s ON Target.sid = s.sid;"),
+  list(title = "Region Activity", tableId = "Activity", sql = "SELECT r.name AS region, c.name AS cell_type,
+       c.tissue AS tissue, s.doi AS doi, evidence AS experiment, activity
+       FROM Activity JOIN Region AS r ON Activity.rid = r.rid
+       JOIN Cell AS c ON Activity.cid = c.cid
+       JOIN Source AS s ON Activity.sid = s.sid;")
 )
 
-ui <- fluidPage(
-  theme = bs_theme(),
-  do.call(tabsetPanel, c(
-    lapply(tabsInfo, function(tabDef) {
-      tab(
-        tabDef$title,
-        DTOutput(outputId = paste0("table", tabDef$tableId))
+ui <- bootstrapPage(
+  tags$div(
+    style = "background-color:#028BBF; padding: 15px; width: 100%;",
+    tags$h1("CFTR Regulatory Region Browser", style = "margin-bottom: 5px; color: white;"),
+    tags$p("Interface for searching known information about CFTR enhancer, chromosome interactions, and TF targets",
+           style = "margin-top: 0; font-size: 16px; color: white;")
+  ),
+  
+  tags$div(
+    style = "margin: 20px 40px;",
+    tags$style(HTML("
+      .nav.nav-tabs {
+        margin-bottom: 20px;
+      }
+      .dataTables_wrapper .dataTables_info,
+      .dataTables_wrapper .dataTables_paginate {
+        margin-top: 40px;  
+      }
+      .dataTables_scrollBody {
+        overflow-y: hidden!important;
+       }
+    ")),
+    
+    do.call(tabsetPanel, c(
+      lapply(tabsInfo, function(tabDef) {
+        tabPanel(
+          tabDef$title,
+          div(
+            style = "padding-bottom: 80px;",
+            DTOutput(outputId = paste0("table", tabDef$tableId))
+          )
+        )
+      }),
+      list(
+        tabPanel("Upload",
+                 h4("Add New Record"),
+                 selectInput("formSelector", "Select table to add data to:",
+                             choices = c("Region", "Cell", "Factor", "Activity", "Contact", "Target")),
+                 uiOutput("formUi"),
+                 verbatimTextOutput("submitStatus")
+        )
       )
-    }),
-    list(
-      tab("Upload",
-          h4("Add New Record"),
-          selectInput("formSelector", "Select table to add data to:",
-                      choices = c("Region", "Cell", "Factor", "Activity", "Contact", "Target")),
-          uiOutput("formUi"),
-          verbatimTextOutput("submitStatus")
-      )
-    )
-  ))
+    ))
+  )
 )
+
+
 
 server <- function(input, output, session) {
   conn <- dbConnect(RSQLite::SQLite(), "enhancerDB.sqlite")
@@ -63,7 +104,8 @@ server <- function(input, output, session) {
         refreshTriggers[[tabCopy$tableId]]()
         datatable(
           dbGetQuery(conn, tabCopy$sql),
-          options = list(pageLength = 10, scrollX = TRUE)
+          filter = "top",
+          options = list(pageLength = 10)
         )
       })
     })
@@ -207,6 +249,7 @@ server <- function(input, output, session) {
                           tags$b("Contact Details"),
                           textInput("contactSourceDoi", "Source DOI (required)"),
                           selectInput("contactEvidence", "Evidence", choices = evidenceChoices$Contact),
+                          selectInput("contactActivity", "Activity", choice = c("Yes", "No", "Unsure")),
                           actionButton("submitContact", "Add Contact")
                       )
                )
@@ -263,6 +306,7 @@ server <- function(input, output, session) {
                           tags$b("Target Details"),
                           textInput("targetSourceDoi", "Source DOI (required)"),
                           selectInput("targetEvidence", "Evidence", choices = evidenceChoices$Target),
+                          selectInput("targetActivity", "Activity", choices = c("Yes", "No", "Unsure")),
                           actionButton("submitTarget", "Add Target")
                       )
                )
@@ -450,8 +494,8 @@ server <- function(input, output, session) {
     sid <- getOrCreateSource(input$contactSourceDoi)
     
     tryCatch({
-      dbExecute(conn, "INSERT INTO Contact (rid1, rid2, cid, sid, evidence) VALUES (?, ?, ?, ?, ?)",
-                params = list(rid1, rid2, cid, sid, input$contactEvidence))
+      dbExecute(conn, "INSERT INTO Contact (rid1, rid2, cid, sid, evidence, activity) VALUES (?, ?, ?, ?, ?, ?)",
+                params = list(rid1, rid2, cid, sid, input$contactEvidence, input$contactActivity))
       output$submitStatus <- renderText("Contact record added successfully.")
       refreshTriggers$Contact(refreshTriggers$Contact() + 1)
     }, error = function(e) {
@@ -519,15 +563,10 @@ server <- function(input, output, session) {
     sid <- getOrCreateSource(input$targetSourceDoi)
     
     tryCatch({
-      dbExecute(conn, "INSERT INTO Target (rid, fid, cid, sid, evidence) VALUES (?, ?, ?, ?, ?)",
-                params = list(rid, fid, cid, sid, input$targetEvidence))
+      dbExecute(conn, "INSERT INTO Target (rid, fid, cid, sid, evidence, activity) VALUES (?, ?, ?, ?, ?, ?)",
+                params = list(rid, fid, cid, sid, input$targetEvidence, input$targetActivity))
       output$submitStatus <- renderText(
-        paste0("Target record added successfully:\n",
-               "Region ID: ", rid, "\n",
-               "Factor ID: ", fid, "\n",
-               "Cell ID: ", cid, "\n",
-               "Source ID: ", sid, "\n",
-               "Evidence: ", input$targetEvidence))
+        paste0("Target record added successfully"))
       refreshTriggers$Target(refreshTriggers$Target() + 1)
     }, error = function(e) {
       output$submitStatus <- renderText(paste("Failed to insert Target:", e$message))
